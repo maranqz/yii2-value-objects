@@ -2,6 +2,8 @@
 
 namespace equicolor\valueObjects;
 
+use yii\base\DynamicModel;
+use yii\base\Model;
 use \yii\db\ActiveRecord;
 use \yii\helpers\Json;
 
@@ -11,7 +13,7 @@ class ValueObjectsBehavior extends \yii\base\Behavior {
 
     private $jsonMap = [];
     private $objectsMap = [];
-    
+
     private $_initialized = false;
 
     public function events()
@@ -23,12 +25,13 @@ class ValueObjectsBehavior extends \yii\base\Behavior {
             ActiveRecord::EVENT_BEFORE_UPDATE => 'putJson',
             ActiveRecord::EVENT_AFTER_INSERT => 'putObjects',
             ActiveRecord::EVENT_AFTER_UPDATE => 'putObjects',
+            ActiveRecord::EVENT_AFTER_VALIDATE => 'validateObjects',
         ];
     }
 
     protected function getValueObjectAttributes() {
         $class = get_class($this->owner);
-        if (!isset(self::$classMap[$class])) {
+        if (!isset(self::$classMap[$class]) || true) {
             if (!method_exists($class, 'valueObjects')) {
                 // у самых глубоких объектов не будет такого метода
                 $attributes = [];
@@ -50,7 +53,7 @@ class ValueObjectsBehavior extends \yii\base\Behavior {
             $this->_initialized = true;
         }
     }
-    
+
     public function afterFind() {
         $this->fillObjects();
         $this->putObjects();
@@ -72,7 +75,7 @@ class ValueObjectsBehavior extends \yii\base\Behavior {
                 $array = json_decode($json, true);
                 $object->setAttributes($array);
             } catch (\Exception $e) {
-                throw new ValueObjectMappingException('Error on creating object', 0, $e);
+                throw new ValueObjectsMappingException('Error on creating object', 0, $e);
             }
         }
     }
@@ -127,7 +130,31 @@ class ValueObjectsBehavior extends \yii\base\Behavior {
             $this->owner->$attribute = $this->getObject($attribute);
         }
     }
-   
+
+    public function validateObjects()
+    {
+        if (!$this->owner instanceof Model) {
+            return;
+        }
+
+        foreach (array_keys($this->getValueObjectAttributes()) as $attribute) {
+            $object = $this->getObject($attribute);
+
+            if (method_exists($object, 'rules')) {
+                $model = DynamicModel::validateData(
+                    $object->getAttributes(),
+                    $object->rules()
+                );
+
+                if ($model->hasErrors()) {
+                    $this->owner->addErrors($model->getErrors());
+                }
+
+                $this->owner->$attribute = $this->getObject($attribute);
+            }
+        }
+    }
+
     protected function setOwnerOldAttributes() {
         if ($this->owner instanceOf \yii\db\ActiveRecordInterface && !$this->owner->isNewRecord) {
             foreach ($this->objectsMap as $attribute => $object) {
