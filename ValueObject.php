@@ -4,149 +4,201 @@ namespace equicolor\valueObjects;
 
 use yii\base\Component;
 use ReflectionClass;
+use yii\base\DynamicModel;
+use yii\base\Model;
 
-class ValueObject extends Component implements IValueObject {
-    const EVENT_INIT = 'init';
+class ValueObject extends Component implements IValueObject
+{
+	const EVENT_INIT = 'init';
 
-    // list
-    private $_attributes;
+	// list
+	private $_attributes;
 
-    // k => v
-    private $_oldAttributes;
+	// k => v
+	private $_oldAttributes;
 
-    public function init()
-    {
-        parent::init();
-        $this->trigger(self::EVENT_INIT);
-    }
+	/**
+	 * @var Model
+	 */
+	private $dynamicModel;
 
-    public function __set($prop, $val) {
-        if (!property_exists($this, $prop)) {
-            throw new \yii\base\UnknownPropertyException("Value object has not \"$prop\" property");
-        }
+	public function init()
+	{
+		parent::init();
+		$this->trigger(self::EVENT_INIT);
+	}
 
-        parent::__set($prop, $val);
-    }
+	public function __set($prop, $val)
+	{
+		if (!property_exists($this, $prop)) {
+			throw new \yii\base\UnknownPropertyException("Value object has not \"$prop\" property");
+		}
 
-    public function behaviors() {
-        return [
-            ValueObjectsBehavior::className()
-        ];
-    }
+		parent::__set($prop, $val);
+	}
 
-    public function toArray() {
-        $data = [];
-        foreach ($this->attributes() as $attr) {
-            $value = $this->$attr;
-            if ($value instanceOf ValueObject) {
-                $data[$attr] = $value->toArray();
-            } else if ($value instanceOf ValueObjectList) {
-                $data[$attr] = $value->toArray();
-            } else {
-                $data[$attr] = $value;
-            }
-        }
+	public function behaviors()
+	{
+		return [
+			ValueObjectsBehavior::className()
+		];
+	}
 
-        return $data;
-    }
+	public function rules()
+	{
+		return [];
+	}
 
-    public function attributes()
-    {
-        if (!$this->_attributes) {
-            $class = new ReflectionClass($this);
-            foreach ($class->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
-                if (!$property->isStatic()) {
-                    $this->_attributes[] = $property->getName();
-                }
-            }
-        }
+	public function toArray()
+	{
+		$data = [];
+		foreach ($this->attributes() as $attr) {
+			$value = $this->$attr;
+			if ($value instanceOf ValueObject) {
+				$data[$attr] = $value->toArray();
+			} else if ($value instanceOf ValueObjectList) {
+				$data[$attr] = $value->toArray();
+			} else {
+				$data[$attr] = $value;
+			}
+		}
 
-        return $this->_attributes;
-    }
+		return $data;
+	}
 
-    public function setAttributes($values) {
-        if (is_array($values)) {
-            $attributes = array_flip($this->attributes());
-            foreach ($values as $name => $value) {
-                if (isset($attributes[$name])) {
-                    $oldValue = $this->$name;
-                    if ($oldValue instanceOf IValueObject && is_array($value)) {
-                        $this->$name->setAttributes($value);
-                    } else {
-                        $this->$name = $value;
-                    }
-                }
-            }
-        }
-    }
-    
-    public function getAttributes($attrs = null) {
-        $data = [];
+	public function attributes()
+	{
+		if (!$this->_attributes) {
+			$class = new ReflectionClass($this);
+			foreach ($class->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
+				if (!$property->isStatic()) {
+					$this->_attributes[] = $property->getName();
+				}
+			}
+		}
 
-        if ($attrs === null) {
-            $attrs = $this->attributes();
-        }
+		return $this->_attributes;
+	}
 
-        foreach ($attrs as $attr) {
-            $value = $this->$attr;
-            if ($value instanceOf IValueObject) {
-                $data[$attr] = $value->toArray();
-            } else {
-                $data[$attr] = $this->$attr;
-            }
-        }
+	public function setAttributes($values)
+	{
+		if (is_array($values)) {
+			$attributes = array_flip($this->attributes());
+			foreach ($values as $name => $value) {
+				if (isset($attributes[$name])) {
+					$oldValue = $this->$name;
+					if ($oldValue instanceOf IValueObject && is_array($value)) {
+						$this->$name->setAttributes($value);
+					} else {
+						$this->$name = $value;
+					}
+				}
+			}
+		}
+	}
 
-        return $data;
-    }
+	public function getAttributes($attrs = null)
+	{
+		$data = [];
 
-    public function setOldAttributes($attrs) {
-        $this->_oldAttributes = $attrs;
-    }
+		if ($attrs === null) {
+			$attrs = $this->attributes();
+		}
 
-    public function getIsChanged() {
-        return !empty($this->getDirtyAttributes());
-    }
+		foreach ($attrs as $attr) {
+			$value = $this->$attr;
+			if ($value instanceOf IValueObject) {
+				$data[$attr] = $value->toArray();
+			} else {
+				$data[$attr] = $this->$attr;
+			}
+		}
 
-    public function getDirtyAttributes($names = null)
-    {
-        if ($names === null) {
-            $names = $this->attributes();
-        }
-        $names = array_flip($names);
-        $attributes = [];
-        if ($this->_oldAttributes === null) {
-            foreach ($this->attributes as $name => $value) {
-                if (isset($names[$name])) {
-                    $attributes[$name] = $value;
-                }
-            }
-        } else {
-            foreach ($this->attributes as $name => $value) {
-                if (isset($names[$name]) && (!array_key_exists($name, $this->_oldAttributes) || $value !== $this->_oldAttributes[$name])) {
-                    $attributes[$name] = $value;
-                }
-            }
-        }
-        return $attributes;
-    }
+		return $data;
+	}
 
-    public function isAttributeChanged($name, $identical = true)
-    {
-        $attributes = $this->attributes;
-        if (isset($attributes[$name], $this->_oldAttributes[$name])) {
-            if ($identical) {
-                return $attributes[$name] !== $this->_oldAttributes[$name];
-            }
-            return $attributes[$name] != $this->_oldAttributes[$name];
-        }
-        return isset($attributes[$name]) || isset($this->_oldAttributes[$name]);
-    }
-    
-    public function getOldAttribute($attr) {
-        return $this->_oldAttributes[$attr];
-    }
+	public function setOldAttributes($attrs)
+	{
+		$this->_oldAttributes = $attrs;
+	}
 
-    public function getAttribute($attr) {
-        return $this->$attr;
-    }
+	public function getIsChanged()
+	{
+		return !empty($this->getDirtyAttributes());
+	}
+
+	public function getDirtyAttributes($names = null)
+	{
+		if ($names === null) {
+			$names = $this->attributes();
+		}
+		$names = array_flip($names);
+		$attributes = [];
+		if ($this->_oldAttributes === null) {
+			foreach ($this->attributes as $name => $value) {
+				if (isset($names[$name])) {
+					$attributes[$name] = $value;
+				}
+			}
+		} else {
+			foreach ($this->attributes as $name => $value) {
+				if (isset($names[$name]) && (!array_key_exists($name, $this->_oldAttributes) || $value !== $this->_oldAttributes[$name])) {
+					$attributes[$name] = $value;
+				}
+			}
+		}
+		return $attributes;
+	}
+
+	public function isAttributeChanged($name, $identical = true)
+	{
+		$attributes = $this->attributes;
+		if (isset($attributes[$name], $this->_oldAttributes[$name])) {
+			if ($identical) {
+				return $attributes[$name] !== $this->_oldAttributes[$name];
+			}
+			return $attributes[$name] != $this->_oldAttributes[$name];
+		}
+		return isset($attributes[$name]) || isset($this->_oldAttributes[$name]);
+	}
+
+	public function getOldAttribute($attr)
+	{
+		return $this->_oldAttributes[$attr];
+	}
+
+	public function getAttribute($attr)
+	{
+		return $this->$attr;
+	}
+
+	public function validate($attributeNames = null, $clearErrors = true)
+	{
+		if (empty($this->dynamicModel)) {
+			$attributes = array_fill_keys($this->attributes(), null);
+			$this->dynamicModel = DynamicModel::validateData($attributes, $this->rules());
+		}
+
+		$this->dynamicModel->setAttributes($this->getAttributes($attributeNames));
+
+		return $this->dynamicModel->validate($attributeNames, $clearErrors);
+	}
+
+	public function hasErrors($attribute = null)
+	{
+		if (empty($this->dynamicModel)) {
+			return false;
+		}
+
+		return $this->dynamicModel->hasErrors($attribute);
+	}
+
+	public function getErrors($attribute = null)
+	{
+		if (empty($this->dynamicModel)) {
+			return [];
+		}
+
+		return $this->dynamicModel->getErrors($attribute);
+	}
 }

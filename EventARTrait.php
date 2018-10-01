@@ -8,20 +8,33 @@ trait EventARTrait
 {
 	public function setAttributes($values, $safeOnly = true)
 	{
-		$this->trigger(static::EVENT_BEFORE_SET_ATTRIBUTES);
+		$event = new ArgumentEvent([
+			'arguments' => [
+				'values' => $values,
+				'safeOnly' => $safeOnly,
+			]
+		]);
+
+		$this->trigger(static::EVENT_BEFORE_SET_ATTRIBUTES, $event);
 
 		parent::setAttributes($values, $safeOnly);
 
-		$this->trigger(static::EVENT_AFTER_SET_ATTRIBUTES);
+		$this->trigger(static::EVENT_AFTER_SET_ATTRIBUTES, $event);
 	}
 
 	public function setAttribute($name, $value)
 	{
-		$this->trigger(static::EVENT_BEFORE_SET_ATTRIBUTE);
+		$event = new ArgumentEvent([
+			'arguments' => [
+				'name' => $name,
+				'value' => $value
+			]]);
+
+		$this->trigger(static::EVENT_BEFORE_SET_ATTRIBUTE, $event);
 
 		parent::setAttribute($name, $value);
 
-		$this->trigger(static::EVENT_AFTER_SET_ATTRIBUTE);
+		$this->trigger(static::EVENT_AFTER_SET_ATTRIBUTE, $event);
 	}
 
 	/**
