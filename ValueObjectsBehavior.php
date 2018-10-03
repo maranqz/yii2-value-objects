@@ -16,7 +16,6 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 	public static $classMap = [];
 
 	public $attributeSeparator = '.';
-	public $initializedAfterFind = false;
 
 	private $jsonMap = [];
 	private $objectsMap = [];
@@ -33,11 +32,12 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 			ActiveRecord::EVENT_AFTER_INSERT => 'putObjects',
 			ActiveRecord::EVENT_AFTER_UPDATE => 'putObjects',
 
-			ActiveRecord::EVENT_BEFORE_VALIDATE => 'putJson',
 			ActiveRecord::EVENT_AFTER_VALIDATE => 'validateObjectsEvent',
 
 			static::EVENT_REINITIALIZE => 'reInitObjects',
 			static::EVENT_FIRST_FILL => 'afterFind',
+
+			EventARInterface::EVENT_AFTER_POPULATE_RECORD => 'populateRecordEvent',
 			EventARInterface::EVENT_AFTER_SET_ATTRIBUTES => 'setAttributesEvent',
 			EventARInterface::EVENT_AFTER_SET_ATTRIBUTE => 'setAttributeEvent',
 		];
@@ -45,21 +45,39 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 		return $commonEvents;
 	}
 
-	protected function getValueObjectAttributes($isChanged = false)
+	public function init()
+	{
+
+		$this->objectsMap = [];
+		$this->jsonMap = [];
+		$this->_initialized = false;
+	}
+
+	protected function getValueObjectAttributes()
 	{
 		$class = get_class($this->owner);
-		if (!isset(self::$classMap[$class]) || $isChanged) {
+		if (!isset(self::$classMap[$class])) {
 			if (!method_exists($class, 'valueObjects')) {
 				// у самых глубоких объектов не будет такого метода
 				$attributes = [];
 			} else {
 				$attributes = $class::valueObjects($this->owner);
 			}
-			if ($isChanged) {
-				return array_filter($attributes, function ($item) {
+			/*if (false === $isChanged) {
+				$attributes = array_filter($attributes, function ($item) {
 					return $item instanceof DependentProperty;
 				});
+
+				return $attributes;
 			}
+
+			if (true === $isChanged) {
+				$attributes = array_filter($attributes, function ($item) {
+					return is_string($item);
+				});
+
+				return $attributes;
+			}*/
 
 			self::$classMap[$class] = $attributes;
 		}
@@ -69,31 +87,34 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 
 	public function reInitObjects()
 	{
-		$this->_initialized = false;
+		$this->init();
 		$this->initObjects();
 	}
 
 	public function initObjectsEvent()
 	{
-		if ($this->initializedAfterFind) {
-			$this->initObjects();
-		}
+		$this->initObjects();
 	}
 
-	public function initObjects($old = false, $isChanged = false)
+	public function initObjects()
 	{
 		if (!$this->_initialized) {
-			$this->createObjects($isChanged);
+			$this->createObjects();
 			// BACKLOG В active record нет смысла инстанциировать value objects сразу, но в Model есть
-			$this->putObjects($old);
-			$this->setOwnerOldAttributes();
+			$this->putObjects();
+			$this->setOwnerOldAttributes(true);
 			$this->_initialized = true;
 		}
 	}
 
+	public function populateRecordEvent()
+	{
+		$this->putObjects();
+		$this->setOwnerOldAttributes(true);
+	}
+
 	public function afterFind()
 	{
-		$this->initObjects(true);
 		$this->fillObjects();
 		$this->putObjects();
 		$this->setOwnerOldAttributes();
@@ -101,7 +122,9 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 
 	protected function fillObjects()
 	{
-		foreach ($this->objectsMap as $attribute => $object) {
+		$attributes = array_keys($this->getValueObjectAttributes());
+		foreach ($attributes as $attribute) {
+			$object = $this->getObject($attribute);
 			$this->fillObject($object, $attribute);
 			$object->setOldAttributes($object->attributes);
 		}
@@ -127,26 +150,34 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 		}
 	}
 
-	protected function createObjects($isChanged = false)
+	protected function createObjects()
 	{
-		foreach ($this->getValueObjectAttributes($isChanged) as $attribute => $class) {
-			if ($class instanceof DependentProperty) {
-				//if ($class->canGet($this->owner)) {
-					$this->objectsMap[$attribute] = $this->createObject($attribute, $class->getClass($this->owner));
-				//}
-			} else {
-				$this->objectsMap[$attribute] = $this->createObject($attribute, $class);
-			}
+		$attributes = $this->getValueObjectAttributes();
+		foreach ($attributes as $attribute => $class) {
+			$this->createObject($attribute, $class);
 		}
 	}
 
-	protected function createObject($attribute, $class)
+	protected function createObject($attribute, $class = null)
 	{
-		if ($class instanceOf ValueObjectList) {
-			return $class;
-		} else {
-			return new $class;
+		if (empty($class)) {
+			$class = $this->getValueObjectAttributes()[$attribute];
 		}
+
+		$object = null;
+
+		if ($class instanceOf ValueObjectList) {
+			$object = $class;
+		} elseif ($class instanceof DependentProperty) {
+			if ($class->canGet($this->owner)) {
+				$className = ($class->getClass($this->owner));
+				$object = new $className;
+			}
+		} else {
+			$object = new $class;
+		}
+
+		return $object;
 	}
 
 	protected function createJson($attribute)
@@ -169,9 +200,9 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 	public function getObject($attribute)
 	{
 		if (!isset($this->objectsMap[$attribute])) {
-			// BACKLOG i dont know how to get class there. Is it neccesarry at all?
-			throw new \Error('not implemented');
-			// $this->objectsMap[$attribute] = $this->createObject($attribute);
+			$this->objectsMap[$attribute] = $this->createObject($attribute);
+
+			$this->owner->$attribute = $this->objectsMap[$attribute];
 		}
 
 		return $this->objectsMap[$attribute];
@@ -184,14 +215,11 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 		}
 	}
 
-	public function putObjects($old = false)
+	public function putObjects()
 	{
-		foreach (array_keys($this->getValueObjectAttributes()) as $attribute) {
-			if ($old) {
-				$this->owner->setOldAttribute($attribute, $this->getObject($attribute));
-			} else {
-				$this->owner->$attribute = $this->getObject($attribute);
-			}
+		$attributes = array_keys($this->getValueObjectAttributes());
+		foreach ($attributes as $attribute) {
+			$this->owner->$attribute = $this->getObject($attribute);
 		}
 	}
 
@@ -203,6 +231,7 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 			return;
 		}
 
+		$this->initObjects();
 		$this->setAttributes($values);
 	}
 
@@ -211,12 +240,12 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 		$name = $event->arguments['name'];
 		$value = $event->arguments['value'];
 
+		$this->initObjects();
 		$this->setAttribute($name, $value);
 	}
 
 	protected function setAttributes($values)
 	{
-		$this->initObjects(true, true);
 		foreach ($values as $name => $value) {
 			$this->setAttribute($name, $value);
 		}
@@ -248,7 +277,6 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 
 	public function validateObjectsEvent()
 	{
-		$this->putObjects();
 		$this->validateObjects();
 	}
 
@@ -263,12 +291,23 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 		}
 	}
 
-	protected function setOwnerOldAttributes()
+	protected function setOwnerOldAttributes($exchange = false)
 	{
 		if ($this->owner instanceOf \yii\db\ActiveRecordInterface && !$this->owner->isNewRecord) {
 			foreach ($this->objectsMap as $attribute => $object) {
+				if ($exchange) {
+					$oldAttribute = $this->owner->getOldAttribute($attribute);
+					$this->owner->setAttribute($attribute, $oldAttribute);
+				}
 				$this->owner->setOldAttribute($attribute, $object);
 			}
+		}
+	}
+
+	protected function setOwnerOldAttribute($attribute, $object)
+	{
+		if ($this->owner instanceOf \yii\db\ActiveRecordInterface && !$this->owner->isNewRecord) {
+			$this->owner->setOldAttribute($attribute, $object);
 		}
 	}
 
