@@ -181,7 +181,11 @@ class ValueObject extends Component implements IValueObject
 
 		$this->dynamicModel->setAttributes($this->getAttributes($attributeNames));
 
-		return $this->dynamicModel->validate($attributeNames, $clearErrors);
+		$valid = $this->dynamicModel->validate($attributeNames, $clearErrors);
+
+		$this->setAttributes($this->dynamicModel->getAttributes());
+
+		return $valid;
 	}
 
 	public function hasErrors($attribute = null)
