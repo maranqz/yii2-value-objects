@@ -63,21 +63,6 @@ class ValueObjectsBehavior extends \yii\base\Behavior
 			} else {
 				$attributes = $class::valueObjects($this->owner);
 			}
-			/*if (false === $isChanged) {
-				$attributes = array_filter($attributes, function ($item) {
-					return $item instanceof DependentProperty;
-				});
-
-				return $attributes;
-			}
-
-			if (true === $isChanged) {
-				$attributes = array_filter($attributes, function ($item) {
-					return is_string($item);
-				});
-
-				return $attributes;
-			}*/
 
 			self::$classMap[$class] = $attributes;
 		}
